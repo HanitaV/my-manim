@@ -16,6 +16,10 @@ __all__ = [
     "SFX_WHOOSH",
     "SFX_SUB_IMPACT",
     "SFX_SHIMMER",
+    "SFX_KEY_TICK",
+    "SFX_PEN_STROKE",
+    "SFX_SOFT_THUD",
+    "SFX_CHAPTER_CHORD",
     "SYNTH_PRESETS",
     "parse_synth_name",
     "synth_duration",
@@ -31,6 +35,10 @@ SFX_UI_POP = "synth:ui_pop"
 SFX_WHOOSH = "synth:airy_whoosh"
 SFX_SUB_IMPACT = "synth:sub_impact"
 SFX_SHIMMER = "synth:hover_shimmer"
+SFX_KEY_TICK = "synth:key_tick"
+SFX_PEN_STROKE = "synth:pen_stroke"
+SFX_SOFT_THUD = "synth:soft_thud"
+SFX_CHAPTER_CHORD = "synth:chapter_chord"
 
 SYNTH_PRESETS: frozenset[str] = frozenset(
     {
@@ -41,6 +49,10 @@ SYNTH_PRESETS: frozenset[str] = frozenset(
         "airy_whoosh",
         "sub_impact",
         "hover_shimmer",
+        "key_tick",
+        "pen_stroke",
+        "soft_thud",
+        "chapter_chord",
     }
 )
 
@@ -207,6 +219,89 @@ def _synth_hover_shimmer(rate: int) -> np.ndarray:
     return np.clip(stereo, -0.85, 0.85).astype(np.float32)
 
 
+def _synth_key_tick(rate: int) -> np.ndarray:
+    duration = 0.022
+    n = round(duration * rate)
+    t = np.arange(n, dtype=np.float32) / rate
+    attack = _raised_cosine_attack(n, 0.0006, rate)
+    tail = _smooth_tail_fade(n, 0.006, rate)
+
+    # Crisp damped mechanical typewriter switch click
+    body = 0.62 * np.sin(2.0 * math.pi * 1820.0 * t) * np.exp(-260.0 * t)
+    cap = 0.38 * np.sin(2.0 * math.pi * 3450.0 * t) * np.exp(-520.0 * t)
+    mono = ((body + cap) * attack * tail).astype(np.float32)
+    mono -= float(np.mean(mono))
+    stereo = np.vstack([mono * 0.98, mono * 1.02]) * 0.58
+    return np.clip(stereo, -0.85, 0.85).astype(np.float32)
+
+
+def _synth_pen_stroke(rate: int) -> np.ndarray:
+    duration = 0.24
+    n = round(duration * rate)
+    t = np.arange(n, dtype=np.float32) / rate
+    u = t / duration
+    env = (np.sin(math.pi * np.power(u, 0.82)) ** 1.6) * _smooth_tail_fade(n, 0.03, rate)
+
+    rng = np.random.default_rng(1687)
+    freqs = np.fft.rfftfreq(n, d=1.0 / rate).astype(np.float32)
+    stereo = np.zeros((2, n), dtype=np.float32)
+    for ch, center in enumerate((1180.0, 1340.0)):
+        noise = rng.standard_normal(n).astype(np.float32)
+        spec = np.fft.rfft(noise)
+        # Soft chalk/marker friction band
+        band = np.exp(-0.5 * ((freqs - center) / 420.0) ** 2) + 0.35 * np.exp(
+            -0.5 * ((freqs - 2650.0) / 680.0) ** 2
+        )
+        shaped = np.fft.irfft(spec * band, n=n).astype(np.float32)
+        peak = max(float(np.max(np.abs(shaped))), 1e-6)
+        stereo[ch] = (shaped / peak) * env * 0.46
+    return np.clip(stereo, -0.85, 0.85).astype(np.float32)
+
+
+def _synth_soft_thud(rate: int) -> np.ndarray:
+    duration = 0.14
+    n = round(duration * rate)
+    t = np.arange(n, dtype=np.float32) / rate
+    attack = _raised_cosine_attack(n, 0.0018, rate)
+    tail = _smooth_tail_fade(n, 0.028, rate)
+
+    # Damped physical mass landing / collision thud (145 Hz -> 52 Hz)
+    freq = 52.0 + 93.0 * np.exp(-28.0 * t)
+    phase = 2.0 * math.pi * np.cumsum(freq, dtype=np.float32) / rate
+    thump = np.sin(phase) * np.exp(-22.0 * t)
+    wood = 0.24 * np.sin(2.0 * math.pi * 380.0 * t) * np.exp(-95.0 * t)
+    mono = ((thump + wood) * attack * tail).astype(np.float32)
+    return np.clip(np.vstack([mono, mono]) * 0.72, -0.85, 0.85).astype(np.float32)
+
+
+def _synth_chapter_chord(rate: int) -> np.ndarray:
+    duration = 1.35
+    n = round(duration * rate)
+    tail = _smooth_tail_fade(n, 0.18, rate)
+
+    # Minimalist warm felt-piano 3-note arpeggio (D4 - A4 - F#5)
+    notes = (
+        (0.00, 293.66, 0.42, (-0.12, 0.08)),
+        (0.14, 440.00, 0.34, (0.04, -0.04)),
+        (0.28, 739.99, 0.25, (0.12, -0.10)),
+    )
+    stereo = np.zeros((2, n), dtype=np.float32)
+    for onset, f0, amp, (l_bias, r_bias) in notes:
+        start_idx = min(n - 1, round(onset * rate))
+        m = n - start_idx
+        tn = np.arange(m, dtype=np.float32) / rate
+        note_attack = _raised_cosine_attack(m, 0.008, rate)
+        tone = (
+            0.70 * np.sin(2.0 * math.pi * f0 * tn) * np.exp(-2.8 * tn)
+            + 0.22 * np.sin(2.0 * math.pi * (2.0 * f0) * tn) * np.exp(-5.4 * tn)
+            + 0.08 * np.sin(2.0 * math.pi * (3.0 * f0) * tn) * np.exp(-9.0 * tn)
+        ) * note_attack
+        stereo[0, start_idx:] += amp * (1.0 + l_bias) * tone
+        stereo[1, start_idx:] += amp * (1.0 + r_bias) * tone
+    stereo *= tail
+    return np.clip(stereo * 0.76, -0.85, 0.85).astype(np.float32)
+
+
 _BUILDERS = {
     "glass_tap": _synth_glass_tap,
     "glass_chime": _synth_glass_chime,
@@ -215,6 +310,10 @@ _BUILDERS = {
     "airy_whoosh": _synth_airy_whoosh,
     "sub_impact": _synth_sub_impact,
     "hover_shimmer": _synth_hover_shimmer,
+    "key_tick": _synth_key_tick,
+    "pen_stroke": _synth_pen_stroke,
+    "soft_thud": _synth_soft_thud,
+    "chapter_chord": _synth_chapter_chord,
 }
 
 

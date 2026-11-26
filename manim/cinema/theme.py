@@ -2,20 +2,24 @@
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Callable, Sequence
 from typing import Any, Literal
 
+import manimpango
 import numpy as np
 from PIL import Image
 
 from manim._config import config, tempconfig
 from manim._config.output import OutputFormat
 from manim.animation.composition import AnimationGroup
-from manim.constants import DOWN, LEFT, ORIGIN, UP
+from manim.constants import DOWN, LEFT, ORIGIN, RIGHT, UP
 from manim.mobject.geometry.polygram import RoundedRectangle
 from manim.mobject.glass import GlassBadge, GlassPanel
 from manim.mobject.mobject import Mobject
+from manim.mobject.text.text_mobject import Text
 from manim.mobject.types.image_mobject import ImageMobject
+from manim.mobject.types.vectorized_mobject import VMobject
 from manim.scene.scene import Scene
 from manim.utils.color import ManimColor, ParsableManimColor
 
@@ -32,6 +36,19 @@ from .director import (
     compute_safe_rect,
     play_blur_transition,
     play_slide_transition,
+)
+from .essay import (
+    AirflowStreamlines,
+    PhysicsVector,
+    SpeedLines,
+    SplitViewport,
+    StageGround,
+    StrobeTrail,
+    play_chapter_card,
+    play_diagonal_wipe,
+    play_spotlight,
+    sketch_highlight,
+    typewriter_reveal,
 )
 from .palette import (
     CINEMA_AMBER,
@@ -168,12 +185,32 @@ def make_ambient_background(
 
 
 _STANDARD_16_9_RES = {(1920, 1080), (1280, 720), (854, 480)}
+_PREFERRED_CINEMA_FONTS: tuple[str, ...] = (
+    "Inter",
+    "Segoe UI",
+    "SF Pro Display",
+    "Helvetica Neue",
+    "Noto Sans",
+    "Arial",
+    "DejaVu Sans",
+)
+
+
+@functools.lru_cache(maxsize=1)
+def default_cinema_font() -> str:
+    """Pick the best installed Unicode/Vietnamese-capable sans-serif font."""
+    available = set(manimpango.list_fonts())
+    for candidate in _PREFERRED_CINEMA_FONTS:
+        if candidate in available:
+            return candidate
+    return ""
 
 
 class CinemaScene(Scene):
     """Preconfigured ``Scene`` with Dark Monochrome Glass, Signals, Director Rig, Audio, and NVENC."""
 
     cinema_background_color: ParsableManimColor = CINEMA_OBSIDIAN
+    cinema_font: str | None = "auto"
     enable_post_fx: bool = True
     ambient_background: bool = True
     use_nvenc: bool = True
@@ -225,14 +262,28 @@ class CinemaScene(Scene):
             super().__init__(*args, **kwargs)
 
         self.narration: NarrationScript = NarrationScript()
+        self._applied_cinema_font: bool = False
 
     def setup(self) -> None:
         super().setup()
+        if self.cinema_font and Text.__init__ is Text._original__init__:
+            resolved_font = (
+                default_cinema_font() if self.cinema_font == "auto" else self.cinema_font
+            )
+            if resolved_font:
+                Text.set_default(font=resolved_font)
+                self._applied_cinema_font = True
         self.camera.background_color = ManimColor(self.cinema_background_color)
         if self.enable_post_fx and self.post_fx is None:
             self.post_fx = CinemaPostFX()
         if self.ambient_background:
             self.add_ambient_background()
+
+    def tear_down(self) -> None:
+        if self._applied_cinema_font:
+            Text.set_default()
+            self._applied_cinema_font = False
+        super().tear_down()
 
     def add_ambient_background(
         self,
@@ -354,6 +405,76 @@ class CinemaScene(Scene):
         **kwargs: Any,
     ) -> None:
         play_slide_transition(self, outgoing, incoming, direction=direction, **kwargs)
+
+    def diagonal_wipe(self, swap_fn: Callable[[], None], **kwargs: Any) -> None:
+        """Sweep an angled wipe shutter across the frame, swapping content mid-wipe."""
+        play_diagonal_wipe(self, swap_fn, **kwargs)
+
+    # --- Visual Essay & 2D Physics Storytelling ---
+
+    def chapter_card(self, part_label: str, title: str, **kwargs: Any) -> None:
+        """Play a minimalist breathing chapter card with warm piano chime."""
+        play_chapter_card(self, part_label, title, **kwargs)
+
+    def typewriter(self, text_mob: VMobject, **kwargs: Any) -> VMobject:
+        """Reveal ``text_mob`` sequentially with a solid block cursor and key ticks."""
+        return typewriter_reveal(self, text_mob, **kwargs)
+
+    def sketch_highlight(self, target: Mobject, **kwargs: Any) -> None:
+        """Draw a transient hand-sketched mineral loop around ``target`` and fade out."""
+        sketch_highlight(self, target, **kwargs)
+
+    def spotlight(self, target: Mobject | Sequence[float], **kwargs: Any) -> None:
+        """Dim everything outside a crisp circular spotlight around ``target``."""
+        play_spotlight(self, target, **kwargs)
+
+    def split_viewport(
+        self,
+        layout: Literal["2x1", "1x2", "3x1"] = "2x1",
+        **kwargs: Any,
+    ) -> SplitViewport:
+        """Create a 2-way or 3-way reference-frame divider matching this scene's frame."""
+        kwargs.setdefault("frame_width", self.camera.frame_width)
+        kwargs.setdefault("frame_height", self.camera.frame_height)
+        return SplitViewport(layout, **kwargs)
+
+    @staticmethod
+    def stage_ground(
+        width: float = 15.0,
+        y_level: float = -2.55,
+        **kwargs: Any,
+    ) -> StageGround:
+        """Create a minimalist physics stage ground plane."""
+        return StageGround(width=width, y_level=y_level, **kwargs)
+
+    @staticmethod
+    def physics_vector(
+        start: Sequence[float] = ORIGIN,
+        direction: Sequence[float] = RIGHT * 1.8,
+        label: str | VMobject | None = None,
+        **kwargs: Any,
+    ) -> PhysicsVector:
+        """Create a semantic ``PhysicsVector`` (velocity/accel/friction/displacement)."""
+        return PhysicsVector(start=start, direction=direction, label=label, **kwargs)
+
+    @staticmethod
+    def speed_lines(
+        width: float = 5.4,
+        height: float = 2.6,
+        **kwargs: Any,
+    ) -> SpeedLines:
+        """Create animated linear streak lines conveying high velocity."""
+        return SpeedLines(width=width, height=height, **kwargs)
+
+    @staticmethod
+    def streamlines(obstacle: Mobject, **kwargs: Any) -> AirflowStreamlines:
+        """Create animated airflow streamlines curving around ``obstacle``."""
+        return AirflowStreamlines(obstacle, **kwargs)
+
+    def strobe_trail(self, target: Mobject, **kwargs: Any) -> StrobeTrail:
+        """Attach an equal-time stroboscopic ghost trail + ``0s, 1s, 2s`` markers."""
+        kwargs.setdefault("scene", self)
+        return StrobeTrail(target, **kwargs)
 
     # --- One-Take Narration & Beat Clock ---
 

@@ -685,6 +685,30 @@ def test_cinema_skill_bundle_and_cli_installer(tmp_path):
     assert repo_skill.read_text(encoding="utf-8") == bundled_skill.read_text(
         encoding="utf-8"
     )
+    assert (
+        repo_root
+        / ".agents"
+        / "skills"
+        / "cinema-director"
+        / "references"
+        / "api-cheatsheet.md"
+    ).read_text(encoding="utf-8") == (
+        repo_root / "manim" / "cinema" / "_skill_assets" / "api-cheatsheet.md"
+    ).read_text(encoding="utf-8")
+    assert (
+        repo_root
+        / ".agents"
+        / "skills"
+        / "cinema-director"
+        / "examples"
+        / "kinematics_cinema_example.py"
+    ).read_text(encoding="utf-8") == (
+        repo_root
+        / "manim"
+        / "cinema"
+        / "_skill_assets"
+        / "kinematics_cinema_example.py.tmpl"
+    ).read_text(encoding="utf-8")
 
     proj_dir = tmp_path / "video_proj"
     proj_dir.mkdir()
@@ -723,4 +747,102 @@ def test_cinema_skill_bundle_and_cli_installer(tmp_path):
     assert result.exit_code == 0, result.output
     assert (cli_dir / ".agents" / "skills" / "cinema-director" / "SKILL.md").exists()
     assert (cli_dir / "AGENTS.md").exists()
+
+
+def test_visual_essay_and_physics_storytelling_kit(tmp_path):
+    from manim import (
+        CINEMA_EMERALD,
+        CINEMA_IVORY,
+        CINEMA_ROSE,
+        SFX_CHAPTER_CHORD,
+        SFX_KEY_TICK,
+        SFX_PEN_STROKE,
+        SFX_SOFT_THUD,
+        ManimColor,
+        PhysicsVector,
+        SplitViewport,
+    )
+
+    for sfx in (SFX_KEY_TICK, SFX_PEN_STROKE, SFX_SOFT_THUD, SFX_CHAPTER_CHORD):
+        preset = sfx.removeprefix("synth:")
+        assert preset in SYNTH_PRESETS
+        assert synthesize_preset(preset).shape[0] == 2
+
+    v_vec = PhysicsVector([0, 0, 0], [1.5, 0, 0], "v", role="velocity")
+    a_vec = PhysicsVector([0, 0, 0], [0, 1.2, 0], "a", role="accel")
+    f_vec = PhysicsVector([0, 0, 0], [-1.0, 0, 0], "F_ms", role="friction")
+    assert v_vec.vector_color == ManimColor(CINEMA_IVORY)
+    assert a_vec.vector_color == ManimColor(CINEMA_EMERALD)
+    assert f_vec.vector_color == ManimColor(CINEMA_ROSE)
+    v_vec.set_vector([0, 0, 0], [0.0, 0.0, 0.0])
+    assert float(v_vec.arrow.stroke_rgbas[0, 3]) == 0.0
+
+    vp3 = SplitViewport("3x1", frame_width=14.0, frame_height=8.0, labels=["A", "B", "C"])
+    assert len(vp3.panes) == 3
+    assert vp3.pane_center(0)[0] < vp3.pane_center(1)[0] < vp3.pane_center(2)[0]
+    assert not hasattr(CinemaScene, "stickman")
+
+    class EssayKitScene(CinemaScene):
+        ambient_background = False
+
+        def construct(self):
+            self.chapter_card("PHẦN 1", "Động học", hold_time=0.1)
+            assert [m for m in self.mobjects if m.family_members_with_points()] == []
+
+            ground = self.stage_ground(surface_type="ice")
+            ball = Dot().move_to([-1.5, ground.surface_y + 0.3, 0.0])
+            trail = self.strobe_trail(ball, interval=0.12)
+            streaks = self.speed_lines(width=3.0, height=1.5)
+            flow = self.streamlines(ball, lines_count=4)
+            self.add(ground, ball, trail, streaks, flow)
+
+            self.play(
+                ball.animate.shift(RIGHT * 2.2),
+                run_time=0.28,
+            )
+            assert len(trail.ghosts) >= 2
+            trail.clear_updaters()
+            streaks.clear_updaters()
+            flow.clear_updaters()
+
+            eq = Text("F = m a", font_size=26).move_to([0.0, 2.0, 0.0])
+            self.typewriter(eq, run_time=0.2, hold_cursor=0.1)
+            visible_after_type = [
+                m for m in self.mobjects if m.family_members_with_points()
+            ]
+
+            self.sketch_highlight(eq, draw_time=0.12, hold_time=0.1, fade_time=0.1)
+            assert [
+                m for m in self.mobjects if m.family_members_with_points()
+            ] == visible_after_type
+
+            self.spotlight(eq, radius=0.9, fade_in=0.1, hold_time=0.1, fade_out=0.1)
+            assert [
+                m for m in self.mobjects if m.family_members_with_points()
+            ] == visible_after_type
+
+            replacement = Text("Done", font_size=28)
+
+            def _swap():
+                for m in list(self.mobjects):
+                    self.remove(m, *m.get_family())
+                self.add(replacement)
+
+            self.diagonal_wipe(_swap, run_time=0.24)
+            assert [m for m in self.mobjects if m.family_members_with_points()] == [
+                replacement
+            ]
+
+    with tempconfig(
+        {
+            "pixel_width": 160,
+            "pixel_height": 90,
+            "frame_rate": 12,
+            "media_dir": str(tmp_path / "media"),
+            "progress_bar": "none",
+            "disable_caching": True,
+        }
+    ):
+        Manager(EssayKitScene()).evaluate()
+
 

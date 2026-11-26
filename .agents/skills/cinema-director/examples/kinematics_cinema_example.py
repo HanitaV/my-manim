@@ -1,7 +1,7 @@
-"""STEM explainer pattern in strict Monochrome Dark Glass + Restrained Mineral Accents.
+"""Visual-Essay STEM physics pattern in Monochrome Dark Luxury + Mineral Accents.
 
 Render with:
-    manim render -r 1920,1080 --fps 24 --format mp4 kinematics_cinema_example.py KinematicsCinemaExample
+    manim render -r 1920,1080 --fps 60 --format mp4 kinematics_cinema_example.py KinematicsCinemaExample
 """
 
 from __future__ import annotations
@@ -10,39 +10,55 @@ from manim import *
 
 
 class KinematicsCinemaExample(CinemaScene):
-    """Demonstrates how to upgrade a physics/STEM slide into Cinema Monochrome Glass."""
+    """Demonstrates Visual Essay physics storytelling (Phenomenon -> Geometry -> Formula-last)."""
 
     aspect = "16:9"
 
     def construct(self) -> None:
-        # 1. Subtle HUD tag in corner GlassBadge (never float naked colored dots/text)
-        ctx_dot = Dot(radius=0.05, color=CINEMA_ICE)
-        ctx_label = Text("BỐI CẢNH", font_size=15, weight=SEMIBOLD, color=CINEMA_PLATINUM)
-        ctx_row = VGroup(ctx_dot, ctx_label).arrange(RIGHT, buff=0.12)
-        ctx_badge = self.glass_badge(width=2.1, height=0.46, sheen_opacity=0.04).to_corner(
-            UR, buff=0.45
+        # 1. Breathing chapter card with warm felt-piano chime
+        self.chapter_card("PHẦN 1", "Quán tính & Vận tốc tức thời", hold_time=0.95)
+
+        # 2. Phenomenon first: minimalist ground stage + sleek geometric puck + StrobeTrail
+        ground = self.stage_ground(y_level=-2.35, surface_type="ice")
+        puck = RoundedRectangle(
+            width=1.05,
+            height=0.46,
+            corner_radius=0.12,
+            fill_color=CINEMA_SLATE,
+            fill_opacity=0.95,
+            stroke_color=CINEMA_IVORY,
+            stroke_width=2.0,
+        ).move_to([-4.2, ground.surface_y + 0.23, 0.0])
+
+        x_sig = self.signal(-4.2)
+        puck.add_updater(lambda m: m.set_x(x_sig()))
+        v_vec = always_redraw(
+            lambda: self.physics_vector(
+                puck.get_right() + RIGHT * 0.08,
+                RIGHT * 1.45,
+                "v = const",
+                role="velocity",
+            )
         )
-        ctx_row.move_to(ctx_badge)
-        ctx_badge.set_z_index(12)
-        ctx_row.set_z_index(13)
+        trail = self.strobe_trail(puck, interval=0.45, show_time_labels=True)
 
-        # 2. Title hero in monochrome gradient + restrained champagne accent
-        title = Text("Động học chất điểm", font_size=44, weight=BOLD)
-        apply_mono_gradient(title, colors=[CINEMA_SILVER, CINEMA_IVORY])
-        subtitle = Text("Bài 2.1 – 2.7  ·  Chuyển động & Độ dốc", font_size=22, color=CINEMA_CHAMPAGNE)
-        title_group = VGroup(title, subtitle).arrange(DOWN, buff=0.22).set_z_index(10)
+        stage_group = VGroup(ground, puck, v_vec, trail)
+        self.play(FadeIn(ground), FadeIn(puck), run_time=0.45)
+        self.add(trail, v_vec)
 
-        self.play(
-            FadeIn(ctx_badge, shift=DOWN * 0.15, rate_func=cinema_spring_smooth),
-            FadeIn(ctx_row, shift=DOWN * 0.12, rate_func=cinema_spring_smooth),
-            FadeIn(title_group, shift=UP * 0.25, rate_func=cinema_spring_smooth).with_sound(
-                SFX_WHOOSH, gain=-3.0
-            ),
-            run_time=0.85,
+        self.play(x_sig.tween(3.2, spring=SmoothSpring, run_time=1.8))
+        puck.clear_updaters()
+        trail.clear_updaters()
+
+        # Formula-last reveal via crisp block-cursor typewriter + transient sketch loop
+        law_eq = Text("F = 0   ⇒   v = hằng số", font_size=34, weight=BOLD).move_to(
+            [0.0, 1.85, 0.0]
         )
-        self.wait(0.45, frozen_frame=False)
+        apply_mono_gradient(law_eq, colors=[CINEMA_SILVER, CINEMA_IVORY])
+        self.typewriter(law_eq, run_time=0.75)
+        self.sketch_highlight(law_eq, color=CINEMA_AMBER, hold_time=0.35)
 
-        # 3. Optical blur transition to interactive x(t) graph + v = dx/dt GlassCard
+        # 3. Diagonal shutter wipe into x(t) tangent geometry + clean GlassStack readout
         t_sig = self.signal(1.2)
         axes = Axes(
             x_range=[0, 5, 1],
@@ -52,12 +68,14 @@ class KinematicsCinemaExample(CinemaScene):
             tips=True,
             axis_config={"color": CINEMA_MUTED, "stroke_width": 1.4},
         )
-        curve = axes.plot(lambda x: 0.45 + 0.12 * x * x + 0.2 * x, x_range=[0.2, 4.6], stroke_width=2.6)
+        curve = axes.plot(
+            lambda x: 0.45 + 0.12 * x * x + 0.2 * x,
+            x_range=[0.2, 4.6],
+            stroke_width=2.6,
+        )
         apply_accent_gradient(curve, CINEMA_ICE, anchor="light")
 
-        left_panel = self.glass_panel(width=6.0, height=4.5, sheen_opacity=0.04).move_to(
-            [-3.3, -0.25, 0.0]
-        )
+        left_panel = self.glass_panel(width=6.0, height=4.4).move_to([-3.3, -0.2, 0.0])
         axes_grp = VGroup(axes, curve).move_to(left_panel).set_z_index(11)
         left_panel.set_z_index(10)
 
@@ -76,15 +94,12 @@ class KinematicsCinemaExample(CinemaScene):
             ).set_z_index(12)
         )
         tangent_dot = always_redraw(
-            lambda: Dot(
-                axes.c2p(t_sig(), _val(t_sig())),
-                radius=0.07,
-                color=WHITE,
-            ).set_z_index(13)
+            lambda: Dot(axes.c2p(t_sig(), _val(t_sig())), radius=0.07, color=WHITE).set_z_index(
+                13
+            )
         )
 
-        # Clean glass formula card via GlassStack + Reactive readout
-        eq_title = Text("VẬN TỐC TỨC THỜI", font_size=18, weight=BOLD, color=CINEMA_SILVER)
+        eq_title = Text("ĐỘ DỐC TIẾP TUYẾN", font_size=17, weight=BOLD, color=CINEMA_SILVER)
         eq_main = Text("v(t) = dx / dt", font_size=34, weight=BOLD)
         apply_mono_gradient(eq_main, colors=[CINEMA_SILVER, CINEMA_IVORY])
         v_readout = ReactiveText(
@@ -96,36 +111,18 @@ class KinematicsCinemaExample(CinemaScene):
             eq_title,
             eq_main,
             v_readout,
-            gap=0.28,
-            padding=(0.55, 0.50),
-        ).move_to([3.55, -0.25, 0.0])
-        right_card.set_z_index(10)
+            gap=0.26,
+            padding=(0.52, 0.48),
+        ).move_to([3.55, -0.2, 0.0])
 
-        slope_pin = self.callout(
-            tangent_dot,
-            "ĐỘ DỐC TIẾP TUYẾN",
-            "Bằng vận tốc v(t)",
-            offset=(-2.2, 1.05, 0.0),
-            accent=CINEMA_CHAMPAGNE,
-        ).set_z_index(14)
+        def _swap_to_geometry() -> None:
+            for mob in (stage_group, law_eq):
+                self.remove(mob, *mob.get_family())
+            self.add(left_panel, axes_grp, tangent, tangent_dot, right_card)
 
-        def _swap_to_graph() -> None:
-            self.remove(title_group, *title_group.get_family())
-            self.add(left_panel, axes_grp, tangent, tangent_dot, right_card, slope_pin)
-
-        self.blur_transition(_swap_to_graph, max_defocus=16.0, run_time=0.7)
-
-        tick_handle = self.bind_value_tick(
-            t_sig.tracker,
-            SFX_SOFT_TICK,
-            step=0.6,
-            cooldown=0.06,
-            gain=-7.0,
-            mobject=tangent_dot,
-        )
-        self.play(t_sig.tween(3.8, spring=SmoothSpring, run_time=1.8))
-        self.remove_updater(tick_handle)
-        self.add_sound(SFX_UI_POP, gain=-3.0, mobject=right_card)
+        self.diagonal_wipe(_swap_to_geometry, run_time=0.65)
+        self.play(t_sig.tween(3.8, spring=SmoothSpring, run_time=1.4))
+        self.spotlight(tangent_dot, radius=1.05, hold_time=0.45)
 
         assert not self.check_layout(safe_rect=self.safe_rect())
-        self.wait(0.6, frozen_frame=False)
+        self.wait(0.4, frozen_frame=False)
