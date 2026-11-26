@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import itertools as it
+import math
 import operator as op
 from collections.abc import Callable, Iterable
-from functools import reduce
+from functools import lru_cache, reduce
 from typing import TYPE_CHECKING, Any
 
 import cairo
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFilter
 
+from manim.cinema.cuda import cuda_available, cuda_process_glass_roi
 from manim.constants import CapStyleType, LineJointType
 from manim.mobject.mobject import Mobject
 from manim.mobject.types.image_mobject import (
@@ -25,6 +27,7 @@ from manim.utils.space_ops import cross2d
 from .target import _CairoRenderTarget
 
 if TYPE_CHECKING:
+    from manim.mobject.glass import GlassStyle
     from manim.typing import (
         FloatRGBA_Array,
         FloatRGBALike_Array,
@@ -49,6 +52,15 @@ _CAP_STYLE_MAP = {
 }
 
 _ImageResolver = Callable[[ImageMobjectFromCamera], np.ndarray | None]
+
+
+@lru_cache(maxsize=2)
+def _frost_noise_tile(size: int = 128) -> np.ndarray:
+    """Deterministic micro-frost noise tile in ``[-1, 1]``."""
+    yy = np.arange(size, dtype=np.float32)[:, None]
+    xx = np.arange(size, dtype=np.float32)[None, :]
+    hashed = np.sin(xx * 12.9898 + yy * 78.233) * 43758.5453
+    return ((hashed - np.floor(hashed)) - 0.5) * 2.0
 
 
 class _CairoDrawingContext:
@@ -116,7 +128,210 @@ class _CairoDrawingContext:
     ) -> None:
         context = self.target.get_context(self.camera)
         for vmobject in vmobjects:
-            self._display_vectorized(vmobject, context)
+            glass_style = getattr(vmobject, "_glass_style", None)
+            if glass_style is not None:
+                self._display_glass_vmobject(vmobject, context, glass_style)
+            else:
+                self._display_vectorized(vmobject, context)
+
+    def _display_glass_vmobject(
+        self,
+        vmobject: VMobject,
+        context: cairo.Context,
+        glass_style: GlassStyle,
+    ) -> None:
+        if vmobject.get_num_points() == 0:
+            return
+        fill_alpha = float(np.max(vmobject.get_fill_opacities()))
+        stroke_alpha = float(np.max(vmobject.get_stroke_opacities()))
+        ratios = []
+        if glass_style.tint_opacity > 1e-4:
+            ratios.append(fill_alpha / glass_style.tint_opacity)
+        if glass_style.rim_opacity > 1e-4:
+            ratios.append(stroke_alpha / glass_style.rim_opacity)
+        alpha_scale = min(1.0, max(ratios)) if ratios else 1.0
+        if alpha_scale <= 1e-3:
+            return
+
+        subpixel = self._points_to_subpixel_coords(vmobject, vmobject.points)
+        if len(subpixel) == 0:
+            return
+
+        settings = self.target.settings
+        px_scale = settings.pixel_height / 1080.0
+        sigma = max(0.0, glass_style.blur_radius * px_scale)
+
+        pad = int(math.ceil(3.0 * sigma + 6))
+        x0 = max(0, int(math.floor(float(np.min(subpixel[:, 0])))) - pad)
+        x1 = min(settings.pixel_width, int(math.ceil(float(np.max(subpixel[:, 0])))) + pad)
+        y0 = max(0, int(math.floor(float(np.min(subpixel[:, 1])))) - pad)
+        y1 = min(settings.pixel_height, int(math.ceil(float(np.max(subpixel[:, 1])))) + pad)
+        if x1 <= x0 or y1 <= y0:
+            return
+
+        # Flush pending Cairo draws so target.pixels contains the live backdrop.
+        context.get_target().flush()
+
+        # Rasterize anti-aliased shape silhouette into scratch ROI.
+        scratch = self.target.get_scratch_target()
+        scratch.pixels[y0:y1, x0:x1] = 0
+        scratch_ctx = scratch.get_context(self.camera)
+        scratch_ctx.get_target().mark_dirty()
+        self._set_cairo_context_path(scratch_ctx, vmobject)
+        scratch_ctx.set_source_rgba(1.0, 1.0, 1.0, 1.0)
+        scratch_ctx.fill()
+        scratch_ctx.get_target().flush()
+        mask = scratch.pixels[y0:y1, x0:x1, 3].astype(np.float32) / 255.0
+        if float(np.max(mask)) <= 1e-3:
+            return
+
+        backdrop_u8 = self.target.pixels[y0:y1, x0:x1, :3].copy()
+        roi_h, roi_w = mask.shape
+        tint_rgb = vmobject.get_fill_color().to_rgb().astype(np.float32)
+        tint_op = float(
+            np.clip(fill_alpha / max(alpha_scale, 1e-4), 0.0, 1.0)
+            if glass_style.tint_opacity > 0.0
+            else 0.0
+        )
+
+        if cuda_available() and roi_h * roi_w >= 4096:
+            self.target.pixels[y0:y1, x0:x1] = cuda_process_glass_roi(
+                backdrop_u8,
+                self.target.pixels[y0:y1, x0:x1],
+                scratch.pixels[y0:y1, x0:x1, 3],
+                sigma=sigma,
+                refraction=glass_style.refraction,
+                px_scale=px_scale,
+                saturation=glass_style.saturation,
+                brightness=glass_style.brightness,
+                tint_rgb=tint_rgb,
+                tint_op=tint_op,
+                sheen_opacity=glass_style.sheen_opacity,
+                frost_noise=glass_style.frost_noise,
+                alpha_scale=alpha_scale,
+                x0=x0,
+                y0=y0,
+            )
+            context.get_target().mark_dirty()
+        else:
+            # 1. Optical backdrop blur via C-accelerated Pillow GaussianBlur
+            if sigma > 8.0 and roi_h >= 32 and roi_w >= 32:
+                ds_w, ds_h = max(1, roi_w // 2), max(1, roi_h // 2)
+                blurred_pil = (
+                    Image.fromarray(backdrop_u8, mode="RGB")
+                    .resize((ds_w, ds_h), resample=Image.Resampling.BILINEAR)
+                    .filter(ImageFilter.GaussianBlur(radius=sigma * 0.5))
+                    .resize((roi_w, roi_h), resample=Image.Resampling.BILINEAR)
+                )
+                blurred = np.asarray(blurred_pil, dtype=np.float32) * (1.0 / 255.0)
+            elif sigma > 0.1:
+                blurred_pil = Image.fromarray(backdrop_u8, mode="RGB").filter(
+                    ImageFilter.GaussianBlur(radius=sigma)
+                )
+                blurred = np.asarray(blurred_pil, dtype=np.float32) * (1.0 / 255.0)
+            else:
+                blurred = backdrop_u8.astype(np.float32) * (1.0 / 255.0)
+
+            # 2. Optional bevel edge refraction (vectorized 2D bilinear warp)
+            if glass_style.refraction > 0.0 and roi_h >= 8 and roi_w >= 8:
+                bevel_pil = Image.fromarray(scratch.pixels[y0:y1, x0:x1, 3], mode="L").filter(
+                    ImageFilter.GaussianBlur(radius=max(1.5, 6.0 * px_scale))
+                )
+                bevel = np.asarray(bevel_pil, dtype=np.float32) * (1.0 / 255.0)
+                gy, gx = np.gradient(bevel)
+                disp = glass_style.refraction * 180.0 * px_scale
+                yy = np.arange(roi_h, dtype=np.float32)[:, None] - gy * disp
+                xx = np.arange(roi_w, dtype=np.float32)[None, :] - gx * disp
+                np.clip(yy, 0.0, roi_h - 1.001, out=yy)
+                np.clip(xx, 0.0, roi_w - 1.001, out=xx)
+                iy0 = yy.astype(np.intp)
+                ix0 = xx.astype(np.intp)
+                fy = (yy - iy0)[..., None]
+                fx = (xx - ix0)[..., None]
+                c00 = blurred[iy0, ix0]
+                c01 = blurred[iy0, ix0 + 1]
+                c10 = blurred[iy0 + 1, ix0]
+                c11 = blurred[iy0 + 1, ix0 + 1]
+                blurred = (c00 * (1.0 - fx) + c01 * fx) * (1.0 - fy) + (
+                    c10 * (1.0 - fx) + c11 * fx
+                ) * fy
+
+            # 3. Chroma boost + brightness
+            luma = (
+                0.2126 * blurred[..., 0]
+                + 0.7152 * blurred[..., 1]
+                + 0.0722 * blurred[..., 2]
+            )[..., None]
+            glass_rgb = np.clip(
+                (luma + (blurred - luma) * glass_style.saturation) * glass_style.brightness,
+                0.0,
+                1.0,
+            )
+
+            # 4. Dark glass tint + optional sheen/frost
+            glass_rgb = glass_rgb * (1.0 - tint_op) + tint_rgb * tint_op
+
+            if glass_style.sheen_opacity > 0.0:
+                v_loc = np.linspace(0.0, 1.0, roi_h, dtype=np.float32)[:, None]
+                sheen = (1.0 - v_loc) * glass_style.sheen_opacity
+                glass_rgb = np.clip(glass_rgb + sheen[..., None], 0.0, 1.0)
+
+            if glass_style.frost_noise > 0.0:
+                tile = _frost_noise_tile(128)
+                frost = tile[
+                    (np.arange(y0, y1) & 127)[:, None],
+                    (np.arange(x0, x1) & 127)[None, :],
+                ] * glass_style.frost_noise
+                glass_rgb = np.clip(glass_rgb + frost[..., None], 0.0, 1.0)
+
+            # 5. Composite glass over target ROI
+            blend = (mask * alpha_scale)[..., None]
+            dst_roi = self.target.pixels[y0:y1, x0:x1].astype(np.float32) / 255.0
+            out_rgb = dst_roi[..., :3] * (1.0 - blend) + glass_rgb * blend
+            out_a = dst_roi[..., 3:4] + blend * (1.0 - dst_roi[..., 3:4])
+            self.target.pixels[y0:y1, x0:x1, :3] = np.clip(
+                out_rgb * 255.0 + 0.5, 0.0, 255.0
+            ).astype(np.uint8)
+            self.target.pixels[y0:y1, x0:x1, 3:4] = np.clip(
+                out_a * 255.0 + 0.5, 0.0, 255.0
+            ).astype(np.uint8)
+            context.get_target().mark_dirty()
+
+        # 7. Background stroke (if any) + 3-stop directional specular rim stroke
+        self._set_cairo_context_path(context, vmobject)
+        self._apply_stroke(context, vmobject, background=True)
+
+        rim_width = float(vmobject.get_stroke_width())
+        if rim_width > 0.0 and stroke_alpha > 1e-3:
+            rim_rgb = vmobject.get_stroke_color().to_rgb()
+            center_pt = vmobject.get_center()
+            half_w = float(vmobject.width) * 0.22
+            top_pt = vmobject.get_top()
+            bot_pt = vmobject.get_bottom()
+            start_pt = np.array([center_pt[0] - half_w, top_pt[1], center_pt[2]])
+            end_pt = np.array([center_pt[0] + half_w, bot_pt[1], center_pt[2]])
+            grad_pts = self.camera.transform_points_pre_display(
+                vmobject, np.vstack([start_pt, end_pt])
+            )
+            pattern = cairo.LinearGradient(
+                float(grad_pts[0, 0]),
+                float(grad_pts[0, 1]),
+                float(grad_pts[1, 0]),
+                float(grad_pts[1, 1]),
+            )
+            # Cairo FORMAT_ARGB32 uses BGRA byte order on little-endian hosts.
+            b, g, r = float(rim_rgb[2]), float(rim_rgb[1]), float(rim_rgb[0])
+            pattern.add_color_stop_rgba(0.00, b, g, r, stroke_alpha)
+            pattern.add_color_stop_rgba(0.32, b * 0.65, g * 0.65, r * 0.65, stroke_alpha * 0.42)
+            pattern.add_color_stop_rgba(0.74, b * 0.08, g * 0.08, r * 0.08, stroke_alpha * 0.50)
+            pattern.add_color_stop_rgba(1.00, b * 0.55, g * 0.55, r * 0.55, stroke_alpha * 0.26)
+            context.set_source(pattern)
+            context.set_line_width(
+                rim_width * settings.cairo_line_width_multiple
+            )
+            context.set_line_join(_LINE_JOIN_MAP[vmobject.joint_type])
+            context.set_line_cap(_CAP_STYLE_MAP[vmobject.cap_style])
+            context.stroke_preserve()
 
     def _display_vectorized(
         self,

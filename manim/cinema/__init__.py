@@ -1,0 +1,162 @@
+"""Cinema dark theme, optical post-FX, spring signals, teardown UI, and frame audio."""
+
+from __future__ import annotations
+
+import importlib
+from typing import Any
+
+from .audio import (
+    attach_frame_trigger,
+    attach_proximity_sound,
+    attach_value_tick,
+)
+from .cuda import (
+    cinema_cuda_config,
+    cuda_available,
+    cuda_device_name,
+    nvenc_available,
+)
+from .postfx import CinemaPostFX
+from .synth import (
+    SFX_GLASS_CHIME,
+    SFX_GLASS_TAP,
+    SFX_SHIMMER,
+    SFX_SOFT_TICK,
+    SFX_SUB_IMPACT,
+    SFX_UI_POP,
+    SFX_WHOOSH,
+    SYNTH_PRESETS,
+    parse_synth_name,
+    synth_duration,
+    synthesize_preset,
+)
+
+__all__ = [
+    "CinemaPostFX",
+    "CinemaScene",
+    "cinema_cuda_config",
+    "cuda_available",
+    "cuda_device_name",
+    "nvenc_available",
+    "make_ambient_background",
+    "make_ambient_background_image",
+    "attach_frame_trigger",
+    "attach_proximity_sound",
+    "attach_value_tick",
+    "SFX_GLASS_TAP",
+    "SFX_GLASS_CHIME",
+    "SFX_SOFT_TICK",
+    "SFX_UI_POP",
+    "SFX_WHOOSH",
+    "SFX_SUB_IMPACT",
+    "SFX_SHIMMER",
+    "SYNTH_PRESETS",
+    "parse_synth_name",
+    "synth_duration",
+    "synthesize_preset",
+    "CINEMA_BLACK",
+    "CINEMA_OBSIDIAN",
+    "CINEMA_MIDNIGHT",
+    "CINEMA_SLATE",
+    "CINEMA_GRAPHITE",
+    "CINEMA_IVORY",
+    "CINEMA_PLATINUM",
+    "CINEMA_SILVER",
+    "CINEMA_MUTED",
+    "CINEMA_MONO_GRADIENT",
+    "CINEMA_ICE",
+    "CINEMA_CYAN",
+    "CINEMA_VIOLET",
+    "CINEMA_EMERALD",
+    "CINEMA_CHAMPAGNE",
+    "CINEMA_AMBER",
+    "CINEMA_ROSE",
+    "harmonize_color",
+    "apply_mono_gradient",
+    "apply_accent_gradient",
+    "ComputedSignal",
+    "Signal",
+    "ReactiveText",
+    "bind_progress_bar",
+    "attach_spring_follower",
+    "GlassStack",
+    "GlassCallout",
+    "ExplodeStack",
+    "GlassCaption",
+    "CinemaMonochromeStyle",
+    "GlassCode",
+    "ASPECT_PRESETS",
+    "WordCue",
+    "NarrationScript",
+    "compute_safe_rect",
+    "play_blur_transition",
+    "play_slide_transition",
+    "camera_focus",
+    "camera_reset",
+    "camera_impulse",
+    "check_scene_layout",
+    "render_contact_sheet",
+]
+
+# Resolve heavier scene/mobject modules lazily to prevent import cycles with manim.scene / renderer
+_LAZY_MODULES: dict[str, str] = {
+    # palette
+    "CINEMA_BLACK": ".palette",
+    "CINEMA_OBSIDIAN": ".palette",
+    "CINEMA_MIDNIGHT": ".palette",
+    "CINEMA_SLATE": ".palette",
+    "CINEMA_GRAPHITE": ".palette",
+    "CINEMA_IVORY": ".palette",
+    "CINEMA_PLATINUM": ".palette",
+    "CINEMA_SILVER": ".palette",
+    "CINEMA_MUTED": ".palette",
+    "CINEMA_MONO_GRADIENT": ".palette",
+    "CINEMA_ICE": ".palette",
+    "CINEMA_CYAN": ".palette",
+    "CINEMA_VIOLET": ".palette",
+    "CINEMA_EMERALD": ".palette",
+    "CINEMA_CHAMPAGNE": ".palette",
+    "CINEMA_AMBER": ".palette",
+    "CINEMA_ROSE": ".palette",
+    "harmonize_color": ".palette",
+    "apply_mono_gradient": ".palette",
+    "apply_accent_gradient": ".palette",
+    # signals
+    "ComputedSignal": ".signals",
+    "Signal": ".signals",
+    "ReactiveText": ".signals",
+    "bind_progress_bar": ".signals",
+    "attach_spring_follower": ".signals",
+    # components
+    "GlassStack": ".components",
+    "GlassCallout": ".components",
+    "ExplodeStack": ".components",
+    "GlassCaption": ".components",
+    # code_view
+    "CinemaMonochromeStyle": ".code_view",
+    "GlassCode": ".code_view",
+    # director
+    "ASPECT_PRESETS": ".director",
+    "WordCue": ".director",
+    "NarrationScript": ".director",
+    "compute_safe_rect": ".director",
+    "play_blur_transition": ".director",
+    "play_slide_transition": ".director",
+    "camera_focus": ".director",
+    "camera_reset": ".director",
+    "camera_impulse": ".director",
+    "check_scene_layout": ".director",
+    "render_contact_sheet": ".director",
+    # theme
+    "CinemaScene": ".theme",
+    "make_ambient_background": ".theme",
+    "make_ambient_background_image": ".theme",
+}
+
+
+def __getattr__(name: str) -> Any:
+    submod_name = _LAZY_MODULES.get(name)
+    if submod_name is not None:
+        mod = importlib.import_module(submod_name, __package__)
+        return getattr(mod, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -52,6 +52,7 @@ if TYPE_CHECKING:
 
     import numpy.typing as npt
 
+    from manim.mobject.glass import GlassStyle
     from manim.typing import (
         CubicBezierPath,
         CubicBezierPointsLike,
@@ -159,6 +160,7 @@ class VMobject(Mobject):
             0, 1, n_points_per_cubic_curve
         )
         self.cap_style: CapStyleType = cap_style
+        self._glass_style: GlassStyle | None = None
         super().__init__(**kwargs)
         self.submobjects: list[VMobject]
 
@@ -479,6 +481,49 @@ class VMobject(Mobject):
         self.set_fill(opacity=opacity, family=family)
         self.set_stroke(opacity=opacity, family=family)
         self.set_stroke(opacity=opacity, family=family, background=True)
+        return self
+
+    def set_glass(
+        self,
+        *,
+        blur_radius: float = 12.0,
+        tint_color: ParsableManimColor = "#0A0A0A",
+        tint_opacity: float = 0.68,
+        saturation: float = 1.08,
+        brightness: float = 1.0,
+        rim_color: ParsableManimColor = WHITE,
+        rim_opacity: float = 0.55,
+        rim_width: float = 1.25,
+        sheen_opacity: float = 0.0,
+        frost_noise: float = 0.0,
+        refraction: float = 0.0,
+    ) -> Self:
+        """Enable clean dark-glass rendering on this ``VMobject``."""
+        # local import to avoid import cycle
+        from manim.mobject.glass import GlassStyle
+
+        tint_mc = ManimColor(tint_color)
+        rim_mc = ManimColor(rim_color)
+        self._glass_style = GlassStyle(
+            blur_radius=blur_radius,
+            saturation=saturation,
+            brightness=brightness,
+            tint_color=tint_mc,
+            tint_opacity=tint_opacity,
+            rim_color=rim_mc,
+            rim_opacity=rim_opacity,
+            rim_width=rim_width,
+            sheen_opacity=sheen_opacity,
+            frost_noise=frost_noise,
+            refraction=refraction,
+        )
+        self.set_fill(tint_mc, opacity=tint_opacity, family=False)
+        self.set_stroke(rim_mc, width=rim_width, opacity=rim_opacity, family=False)
+        return self
+
+    def clear_glass(self) -> Self:
+        """Disable optical frosted-glass rendering on this ``VMobject``."""
+        self._glass_style = None
         return self
 
     def scale(

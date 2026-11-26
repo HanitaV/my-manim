@@ -22,5 +22,5 @@ def get_full_sound_file_path(sound_file_name: StrPath, assets_dir: Path) -> Path
     return seek_full_path_from_defaults(
         sound_file_name,
         default_dir=assets_dir,
-        extensions=[".wav", ".mp3"],
+        extensions=[".wav", ".mp3", ".ogg", ".flac", ".m4a"],
     )

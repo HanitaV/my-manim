@@ -33,6 +33,8 @@ from .animation.transform import *
 from .animation.transform_matching_parts import *
 from .animation.updaters.mobject_update_utils import *
 from .animation.updaters.update import *
+from .cinema import *
+from .cinema.theme import *
 from .constants import *
 from .manager import *
 from .mobject.frame import *
@@ -43,6 +45,7 @@ from .mobject.geometry.line import *
 from .mobject.geometry.polygram import *
 from .mobject.geometry.shape_matchers import *
 from .mobject.geometry.tips import *
+from .mobject.glass import *
 from .mobject.graph import *
 from .mobject.graphing.coordinate_systems import *
 from .mobject.graphing.functions import *

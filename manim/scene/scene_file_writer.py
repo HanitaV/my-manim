@@ -82,6 +82,9 @@ class _AudioTrack:
     ) -> None:
         self._container = container
         self._stream = container.add_stream(codec, rate=SAMPLE_RATE, layout=LAYOUT)
+        if codec == "aac":
+            with suppress(Exception):
+                self._stream.bit_rate = 256_000
         self._blocks = blocks
         self._written = 0
         self._finished = False
@@ -1051,9 +1054,10 @@ class SceneFileWriter:
         if not self.output_spec.is_gif:
             for sound in self._sounds:
                 duration = sound.duration
+                sound_label = str(sound.path) if sound.path is not None else sound.file
                 spans.append(
                     (
-                        f"Sound {str(sound.path)!r}",
+                        f"Sound {sound_label!r}",
                         sound.start,
                         None if duration is None else sound.start + duration,
                     )

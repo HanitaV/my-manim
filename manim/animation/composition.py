@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 
 import numpy as np
 
@@ -89,6 +89,8 @@ class AnimationGroup(Animation):
                 f"Trying to play {self} without animations, this is not supported. "
                 "Please add at least one subanimation."
             )
+        for cue in self._sound_cues:
+            cue._fired = False
         self.anim_group_time = 0.0
         if self.suspend_mobject_updating:
             self.group.suspend_updating()
@@ -96,10 +98,12 @@ class AnimationGroup(Animation):
             anim.begin()
 
     def _setup_scene(self, scene: Scene) -> None:
+        self._bound_scene = scene
         for anim in self.animations:
             anim._setup_scene(scene)
 
     def finish(self) -> None:
+        self._update_sound_cues(1.0)
         for anim in self.animations:
             anim.finish()
         self.anims_begun[:] = True
@@ -109,10 +113,46 @@ class AnimationGroup(Animation):
 
     def clean_up_from_scene(self, scene: Scene) -> None:
         self._on_finish(scene)
+        self._bound_scene = None
         for anim in self.animations:
             if self.remover:
                 anim.remover = self.remover
             anim.clean_up_from_scene(scene)
+
+    def with_staggered_sound(
+        self,
+        sound: str = "synth:glass_tap",
+        *,
+        at_alpha: float = 0.05,
+        gain: float | None = -3.0,
+        pitch_start: float = 0.0,
+        pitch_step: float = 1.5,
+        auto_pan: bool = True,
+    ) -> Self:
+        """Attach progressive pitch-stepped sound cues to each sub-animation."""
+        for index, anim in enumerate(self.animations):
+            anim.with_sound(
+                sound,
+                at_alpha=at_alpha,
+                gain=gain,
+                pitch=pitch_start + index * pitch_step,
+                auto_pan=auto_pan,
+            )
+        return self
+
+    def _update_sound_cues(self, alpha: float) -> None:
+        super()._update_sound_cues(alpha)
+        anim_group_time = self.rate_func(alpha) * self.max_end_time
+        for anim, start, end in self.anims_with_timings:
+            if anim_group_time < start - 1e-9:
+                continue
+            span = end - start
+            sub_alpha = (
+                1.0
+                if span <= 0.0
+                else float(min(1.0, max(0.0, (anim_group_time - start) / span)))
+            )
+            anim._update_sound_cues(sub_alpha)
 
     def update_mobjects(self, dt: float) -> None:
         for anim in self.anims_with_timings["anim"][
@@ -241,9 +281,15 @@ class Succession(AnimationGroup):
                 f"Trying to play {self} without animations, this is not supported. "
                 "Please add at least one subanimation."
             )
+        for cue in self._sound_cues:
+            cue._fired = False
+        for anim in self.animations:
+            for cue in anim._sound_cues:
+                cue._fired = False
         self.update_active_animation(0)
 
     def finish(self) -> None:
+        self._update_sound_cues(1.0)
         while self.active_animation is not None:
             self.next_animation()
 
@@ -254,6 +300,9 @@ class Succession(AnimationGroup):
     def _setup_scene(self, scene: Scene | None) -> None:
         if scene is None:
             return
+        self._bound_scene = scene
+        for anim in self.animations:
+            anim._bound_scene = scene
         if self.is_introducer():
             for anim in self.animations:
                 if not anim.is_introducer() and anim.mobject is not None:

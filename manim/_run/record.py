@@ -227,6 +227,10 @@ class _RunRecord(_RunListener):
                 "gain": marker.gain,
                 "gain_to_background": marker.gain_to_background,
             }
+            if marker.pan != 0.0:
+                values["pan"] = marker.pan
+            if marker.pitch != 0.0:
+                values["pitch"] = marker.pitch
         if self.capture:
             # A copy, so that later changes by scene code are not recorded.
             values = _plain(values)

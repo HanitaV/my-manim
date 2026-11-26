@@ -79,6 +79,8 @@ if TYPE_CHECKING:
 
     from PIL.Image import Image
 
+    from manim.cinema.postfx import CinemaPostFX
+    from manim.mobject.value_tracker import ValueTracker
     from manim.typing import Point3D
 
     SceneInteractAction: TypeAlias = (
@@ -219,6 +221,7 @@ class Scene:
         self.mouse_press_callbacks: list[Callable[[], None]] = []
         self.interactive_mode = False
         self.manager: Manager[Self] | None = None
+        self.post_fx: CinemaPostFX | None = None
 
         if config.renderer == RendererType.OPENGL:
             # Items associated with interaction
@@ -1716,10 +1719,99 @@ class Scene:
             animation.update_mobjects(dt)
             # An animation that takes no time is complete from the start.
             alpha = t / animation.run_time if animation.run_time > 0 else 1.0
+            animation._update_sound_cues(alpha)
             animation.interpolate(alpha)
         self.update_mobjects(dt)
         self.update_meshes(dt)
         self.update_self(dt)
+
+    def on_frame_trigger(
+        self,
+        condition: Callable[[], bool],
+        sound: str = "synth:glass_tap",
+        *,
+        cooldown: float = 0.05,
+        gain: float | None = None,
+        gain_fn: Callable[[], float] | None = None,
+        pitch: float = 0.0,
+        pitch_jitter: float = 0.35,
+        mobject: Mobject | None = None,
+        pan: float | None = None,
+    ) -> Callable[[float], None]:
+        """Attach a rising-edge per-frame interaction sound trigger."""
+        # local import to avoid import cycle
+        from manim.cinema.audio import attach_frame_trigger
+
+        return attach_frame_trigger(
+            self,
+            condition,
+            sound,
+            cooldown=cooldown,
+            gain=gain,
+            gain_fn=gain_fn,
+            pitch=pitch,
+            pitch_jitter=pitch_jitter,
+            mobject=mobject,
+            pan=pan,
+        )
+
+    def bind_value_tick(
+        self,
+        source: ValueTracker | Callable[[], float],
+        sound: str = "synth:soft_tick",
+        *,
+        step: float = 1.0,
+        cooldown: float = 0.03,
+        gain: float | None = -8.0,
+        pitch_base: float = 0.0,
+        pitch_per_unit: float = 0.0,
+        mobject: Mobject | None = None,
+        pan: float | None = None,
+    ) -> Callable[[float], None]:
+        """Play a quantized tick sound whenever ``source`` crosses ``step``."""
+        # local import to avoid import cycle
+        from manim.cinema.audio import attach_value_tick
+
+        return attach_value_tick(
+            self,
+            source,
+            sound,
+            step=step,
+            cooldown=cooldown,
+            gain=gain,
+            pitch_base=pitch_base,
+            pitch_per_unit=pitch_per_unit,
+            mobject=mobject,
+            pan=pan,
+        )
+
+    def on_proximity_sound(
+        self,
+        probe: Mobject,
+        targets: Sequence[Mobject],
+        sound: str = "synth:hover_shimmer",
+        *,
+        radius: float | None = None,
+        cooldown: float = 0.08,
+        gain: float | None = -4.0,
+        pitch_base: float = 0.0,
+        pitch_step: float = 2.0,
+    ) -> Callable[[float], None]:
+        """Play spatialized sound on the exact frame ``probe`` enters each target."""
+        # local import to avoid import cycle
+        from manim.cinema.audio import attach_proximity_sound
+
+        return attach_proximity_sound(
+            self,
+            probe,
+            targets,
+            sound,
+            radius=radius,
+            cooldown=cooldown,
+            gain=gain,
+            pitch_base=pitch_base,
+            pitch_step=pitch_step,
+        )
 
     def add_subcaption(
         self, content: str, duration: float = 1, offset: float = 0
@@ -1769,61 +1861,31 @@ class Scene:
         time_offset: float = 0,
         gain: float | None = None,
         gain_to_background: float | None = None,
+        *,
+        pan: float | None = None,
+        pitch: float = 0.0,
+        fade_in: float = 0.0,
+        fade_out: float = 0.0,
+        mobject: Mobject | OpenGLMobject | None = None,
     ) -> None:
         """Add a sound to the scene, starting at the current scene time.
 
-        All sounds of a scene are mixed into one track, shared by the movie and its
-        section videos. Parts of the scene left out of the output, by ``-n`` or a
-        section with ``skip_animations=True``, cut the sound like the video. Parts
-        before the start of the scene or after its end are cut too; when the movie
-        is assembled, a warning names the sound.
-
-        Any format PyAV can decode is supported. The file is checked when the call
-        is made during a render or a timeline capture.
-
-        Parameters
-        ----------
-        sound_file
-            The path to the sound file, absolute or relative to the assets
-            directory.
-        time_offset
-            Seconds by which to move the start of the sound relative to the
-            current scene time. Negative values start it earlier.
-        gain
-            Gain applied to the sound, in dB.
-        gain_to_background
-            Gain in dB applied to all previously added sounds while this one
-            plays, for example to lower music under a voice.
-
-        Raises
-        ------
-        OSError
-            If the sound file does not exist.
-        ValueError
-            If the sound file cannot be read as audio.
-
-        Examples
-        --------
-        .. manim:: SoundExample
-            :no_autoplay:
-
-            class SoundExample(Scene):
-                # Source of sound under Creative Commons 0 License. https://freesound.org/people/Druminfected/sounds/250551/
-                def construct(self):
-                    dot = Dot().set_color(GREEN)
-                    self.add_sound("click.wav")
-                    self.add(dot)
-                    self.wait()
-                    self.add_sound("click.wav")
-                    dot.set_color(BLUE)
-                    self.wait()
-                    self.add_sound("click.wav")
-                    dot.set_color(RED)
-                    self.wait()
-
-        Download the resource for the previous example `here <https://github.com/ManimCommunity/manim/blob/main/docs/source/_static/click.wav>`_ .
+        Supports external audio files as well as built-in procedural presets
+        such as ``"synth:glass_tap"`` and ``"synth:glass_chime"``. Pass ``pan``
+        (``-1.0`` left to ``1.0`` right) or ``mobject`` for automatic spatial
+        panning, ``pitch`` in semitones, and ``fade_in`` / ``fade_out`` in seconds.
         """
-        self._get_manager().add_sound(sound_file, time_offset, gain, gain_to_background)
+        self._get_manager().add_sound(
+            sound_file,
+            time_offset,
+            gain,
+            gain_to_background,
+            pan=pan,
+            pitch=pitch,
+            fade_in=fade_in,
+            fade_out=fade_out,
+            mobject=mobject,
+        )
 
     def on_mouse_motion(self, point: Point3D, d_point: Point3D) -> None:
         assert isinstance(self.camera, OpenGLCamera)

@@ -103,10 +103,26 @@ __all__ = [
     "squish_rate_func",
     "lingering",
     "exponential_decay",
+    "cubic_bezier",
+    "cinema_ease",
+    "cinema_smooth_out",
+    "cinema_snappy",
+    "cinema_dramatic",
+    "SpringSpec",
+    "SmoothSpring",
+    "SnappySpring",
+    "PlopSpring",
+    "GentleSpring",
+    "spring_duration",
+    "spring_rate",
+    "cinema_spring_smooth",
+    "cinema_spring_snappy",
+    "cinema_spring_plop",
 ]
 
+from dataclasses import dataclass
 from functools import wraps
-from math import sqrt
+from math import cos, exp, sin, sqrt
 from typing import Any, Protocol
 
 import numpy as np
@@ -523,3 +539,170 @@ def ease_in_out_bounce(t: float) -> float:
         return (1 - ease_out_bounce(1 - 2 * t)) / 2
     else:
         return (1 + ease_out_bounce(2 * t - 1)) / 2
+
+
+def cubic_bezier(
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+) -> RateFunction:
+    """Create a CSS/After-Effects style cubic-bezier easing curve.
+
+    Control points ``(0, 0)``, ``(x1, y1)``, ``(x2, y2)``, ``(1, 1)`` define
+    a parametric curve where ``x1`` and ``x2`` lie in ``[0, 1]``.
+    """
+
+    def _bezier_coord(s: float, p1: float, p2: float) -> float:
+        inv = 1.0 - s
+        return 3.0 * inv * inv * s * p1 + 3.0 * inv * s * s * p2 + s * s * s
+
+    def _bezier_deriv(s: float, p1: float, p2: float) -> float:
+        inv = 1.0 - s
+        return (
+            3.0 * inv * inv * p1
+            + 6.0 * inv * s * (p2 - p1)
+            + 3.0 * s * s * (1.0 - p2)
+        )
+
+    @unit_interval
+    def _curve(t: float) -> float:
+        if t <= 0.0:
+            return 0.0
+        if t >= 1.0:
+            return 1.0
+        s = t
+        lo, hi = 0.0, 1.0
+        for _ in range(6):
+            x = _bezier_coord(s, x1, x2)
+            err = x - t
+            if abs(err) < 1e-7:
+                break
+            if err < 0.0:
+                lo = max(lo, s)
+            else:
+                hi = min(hi, s)
+            dx = _bezier_deriv(s, x1, x2)
+            if abs(dx) > 1e-6:
+                s_next = s - err / dx
+                if lo < s_next < hi:
+                    s = s_next
+                    continue
+            s = 0.5 * (lo + hi)
+        else:
+            for _ in range(12):
+                x = _bezier_coord(s, x1, x2)
+                if abs(x - t) < 1e-7:
+                    break
+                if x < t:
+                    lo = s
+                else:
+                    hi = s
+                s = 0.5 * (lo + hi)
+        return _bezier_coord(s, y1, y2)
+
+    return _curve
+
+
+cinema_ease: RateFunction = cubic_bezier(0.25, 0.1, 0.25, 1.0)
+cinema_smooth_out: RateFunction = cubic_bezier(0.16, 1.0, 0.3, 1.0)
+cinema_snappy: RateFunction = cubic_bezier(0.22, 1.0, 0.36, 1.0)
+cinema_dramatic: RateFunction = cubic_bezier(0.7, 0.0, 0.2, 1.0)
+
+
+@dataclass(frozen=True, slots=True)
+class SpringSpec:
+    """Physical damped harmonic oscillator parameters for Motion-Canvas-style springs."""
+
+    mass: float = 1.0
+    stiffness: float = 180.0
+    damping: float = 24.0
+    velocity: float = 0.0
+
+
+SmoothSpring = SpringSpec(mass=1.0, stiffness=170.0, damping=26.5)
+SnappySpring = SpringSpec(mass=1.0, stiffness=280.0, damping=28.0)
+PlopSpring = SpringSpec(mass=1.0, stiffness=240.0, damping=16.0)
+GentleSpring = SpringSpec(mass=1.0, stiffness=105.0, damping=21.0)
+
+
+def _eval_spring(spec: SpringSpec, tau: float) -> tuple[float, float]:
+    """Evaluate analytical step response ``x(tau), x'(tau)`` for ``x(0)=0 -> x(inf)=1``."""
+    if tau <= 0.0:
+        return 0.0, float(spec.velocity)
+    m = max(float(spec.mass), 1e-4)
+    k = max(float(spec.stiffness), 1e-4)
+    c = max(float(spec.damping), 0.0)
+    v0 = float(spec.velocity)
+    omega0 = sqrt(k / m)
+    zeta = c / (2.0 * sqrt(k * m))
+    y0 = -1.0  # y = x - 1
+
+    if zeta < 1.0 - 1e-5:
+        omega_d = omega0 * sqrt(1.0 - zeta * zeta)
+        envelope = exp(-zeta * omega0 * tau)
+        a = y0
+        b = (v0 + zeta * omega0 * y0) / omega_d
+        sin_t = sin(omega_d * tau)
+        cos_t = cos(omega_d * tau)
+        y = envelope * (a * cos_t + b * sin_t)
+        dy = envelope * (
+            (-zeta * omega0 * a + omega_d * b) * cos_t
+            + (-zeta * omega0 * b - omega_d * a) * sin_t
+        )
+    elif abs(zeta - 1.0) <= 1e-5:
+        envelope = exp(-omega0 * tau)
+        c1 = y0
+        c2 = v0 + omega0 * y0
+        y = envelope * (c1 + c2 * tau)
+        dy = envelope * (c2 - omega0 * (c1 + c2 * tau))
+    else:
+        root = sqrt(zeta * zeta - 1.0)
+        r1 = -omega0 * (zeta - root)
+        r2 = -omega0 * (zeta + root)
+        denom = r1 - r2
+        c1 = (v0 - r2 * y0) / denom
+        c2 = y0 - c1
+        e1 = exp(r1 * tau)
+        e2 = exp(r2 * tau)
+        y = c1 * e1 + c2 * e2
+        dy = c1 * r1 * e1 + c2 * r2 * e2
+
+    return 1.0 + y, dy
+
+
+def spring_duration(spec: SpringSpec = SmoothSpring, epsilon: float = 1e-3) -> float:
+    """Estimate natural settle duration (seconds) for ``spec`` within ``epsilon``."""
+    omega0 = sqrt(max(float(spec.stiffness), 1e-4) / max(float(spec.mass), 1e-4))
+    last_unsettled = 0.15
+    for step in range(501):
+        tau = step * 0.01
+        pos, vel = _eval_spring(spec, tau)
+        if abs(1.0 - pos) > epsilon or abs(vel) / max(omega0, 1.0) > epsilon:
+            last_unsettled = tau
+    return float(np.clip(last_unsettled + 0.02, 0.15, 5.0))
+
+
+def spring_rate(
+    spec: SpringSpec = SmoothSpring,
+    duration: float | None = None,
+) -> RateFunction:
+    """Create a Manim ``RateFunction`` driven by physical spring dynamics."""
+    dur = spring_duration(spec) if duration is None else max(float(duration), 0.05)
+    end_pos, _ = _eval_spring(spec, dur)
+
+    @unit_interval
+    def _spring_curve(t: float) -> float:
+        if t <= 0.0:
+            return 0.0
+        if t >= 1.0:
+            return 1.0
+        pos, _ = _eval_spring(spec, t * dur)
+        return pos + (1.0 - end_pos) * t
+
+    return _spring_curve
+
+
+cinema_spring_smooth: RateFunction = spring_rate(SmoothSpring)
+cinema_spring_snappy: RateFunction = spring_rate(SnappySpring)
+cinema_spring_plop: RateFunction = spring_rate(PlopSpring)

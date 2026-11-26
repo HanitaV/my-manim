@@ -59,6 +59,7 @@ class _SegmentCache:
             return f"uncached_{play.index:05}"
         scene = manager.scene
         backend, drawing_state = manager.renderer._animation_cache_identity(scene)
+        post_fx = getattr(scene, "post_fx", None)
         return get_hash_from_play_call(
             scene,
             manager.camera,
@@ -69,7 +70,10 @@ class _SegmentCache:
                 manager.session_spec.video_encoder
             ),
             renderer_state={
-                "drawing": drawing_state,
+                "drawing": {
+                    "backend": drawing_state,
+                    "post_fx": post_fx.cache_dict() if post_fx is not None else None,
+                },
                 "execution": {
                     "clock": _CLOCK_VERSION,
                     # Plays can read the scene time, so the same inputs at another

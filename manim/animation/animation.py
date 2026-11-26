@@ -16,6 +16,7 @@ __all__ = ["Animation", "Wait", "Add", "override_animation"]
 
 from collections.abc import Callable, Iterable, Sequence
 from copy import deepcopy
+from dataclasses import dataclass
 from functools import partialmethod
 from typing import TYPE_CHECKING, Any, Self
 
@@ -25,6 +26,20 @@ if TYPE_CHECKING:
 
 DEFAULT_ANIMATION_RUN_TIME: float = 1.0
 DEFAULT_ANIMATION_LAG_RATIO: float = 0.0
+
+
+@dataclass(slots=True)
+class _AnimationSoundCue:
+    """A sound cue bound to an animation's normalized progress ``alpha``."""
+
+    sound: str
+    at_alpha: float = 0.0
+    gain: float | None = None
+    pitch: float = 0.0
+    pan: float | None = None
+    auto_pan: bool = True
+    time_offset: float = 0.0
+    _fired: bool = False
 
 
 class Animation:
@@ -150,6 +165,8 @@ class Animation:
         self.suspend_mobject_updating: bool = suspend_mobject_updating
         self.lag_ratio: float = lag_ratio
         self._on_finish: Callable[[Scene], None] = _on_finish
+        self._sound_cues: list[_AnimationSoundCue] = []
+        self._bound_scene: Scene | None = None
         if config.renderer == RendererType.OPENGL:
             self.starting_mobject: OpenGLMobject = OpenGLMobject()
             self.mobject: OpenGLMobject = (
@@ -202,6 +219,8 @@ class Animation:
         method.
 
         """
+        for cue in self._sound_cues:
+            cue._fired = False
         self.starting_mobject = self.create_starting_mobject()
         if self.suspend_mobject_updating:
             # All calls to self.mobject's internal updaters
@@ -222,6 +241,7 @@ class Animation:
         This method gets called when the animation is over.
 
         """
+        self._update_sound_cues(1.0)
         self.interpolate(1)
         if self.suspend_mobject_updating and self.mobject is not None:
             self.mobject.resume_updating()
@@ -238,6 +258,7 @@ class Animation:
             The scene the animation should be cleaned up from.
         """
         self._on_finish(scene)
+        self._bound_scene = None
         if self.is_remover():
             scene.remove(self.mobject)
 
@@ -254,11 +275,68 @@ class Animation:
         """
         if scene is None:
             return
+        self._bound_scene = scene
         if (
             self.is_introducer()
             and self.mobject not in scene.get_mobject_family_members()
         ):
             scene.add(self.mobject)
+
+    def with_sound(
+        self,
+        sound: str = "synth:glass_tap",
+        *,
+        at_alpha: float = 0.0,
+        gain: float | None = None,
+        pitch: float = 0.0,
+        pan: float | None = None,
+        auto_pan: bool = True,
+        time_offset: float = 0.0,
+    ) -> Self:
+        """Attach a sound cue triggered when this animation reaches ``at_alpha``."""
+        # local import to avoid import cycle
+        from manim.cinema.synth import parse_synth_name
+
+        parse_synth_name(sound)
+        self._sound_cues.append(
+            _AnimationSoundCue(
+                sound=sound,
+                at_alpha=float(at_alpha),
+                gain=gain,
+                pitch=float(pitch),
+                pan=pan,
+                auto_pan=auto_pan,
+                time_offset=float(time_offset),
+            )
+        )
+        return self
+
+    def _update_sound_cues(self, alpha: float) -> None:
+        scene = self._bound_scene
+        if scene is None or not self._sound_cues:
+            return
+        for cue in self._sound_cues:
+            if not cue._fired and alpha >= cue.at_alpha - 1e-9:
+                cue._fired = True
+                target_mob = None
+                if cue.pan is None and cue.auto_pan:
+                    target_mob = self.mobject
+                    if (
+                        target_mob is not None
+                        and not target_mob.submobjects
+                        and not target_mob.has_points()
+                    ):
+                        children = getattr(self, "animations", None)
+                        if children:
+                            target_mob = children[0].mobject
+                scene.add_sound(
+                    cue.sound,
+                    time_offset=cue.time_offset,
+                    gain=cue.gain,
+                    pan=cue.pan,
+                    pitch=cue.pitch,
+                    mobject=target_mob,
+                )
 
     def create_starting_mobject(self) -> Mobject | OpenGLMobject:
         # Keep track of where the mobject starts

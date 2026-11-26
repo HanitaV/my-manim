@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from ._config.render_session import RenderSessionSpec
     from .animation.animation import Animation
     from .mobject.mobject import Mobject, _AnimationBuilder
+    from .mobject.opengl.opengl_mobject import OpenGLMobject
     from .renderer._execution import _ExecutionState
     from .renderer.cairo import CairoRenderer
     from .renderer.cairo.camera import Camera
@@ -954,25 +955,25 @@ class Manager(Generic[SceneT]):
         time_offset: float = 0,
         gain: float | None = None,
         gain_to_background: float | None = None,
+        *,
+        pan: float | None = None,
+        pitch: float = 0.0,
+        fade_in: float = 0.0,
+        fade_out: float = 0.0,
+        mobject: Mobject | OpenGLMobject | None = None,
     ) -> None:
         """Add a sound at the current scene time.
 
         See :meth:`.Scene.add_sound` for how sounds are placed in the movie.
-
-        Parameters
-        ----------
-        sound_file
-            The path to the sound file, absolute or relative to the assets
-            directory.
-        time_offset
-            Seconds by which to move the start of the sound relative to the
-            current scene time.
-        gain
-            Gain applied to the sound, in dB.
-        gain_to_background
-            Gain applied to all previously added sounds while this one plays,
-            in dB.
         """
+        if pan is None:
+            if mobject is not None:
+                half_width = max(float(config.frame_x_radius), 1e-6)
+                resolved_pan = float(max(-0.9, min(0.9, mobject.get_x() / half_width)))
+            else:
+                resolved_pan = 0.0
+        else:
+            resolved_pan = float(pan)
         # The file is found and checked now, in every run: a missing or unreadable
         # file is an error at the call that names it.
         sound = _Sound.at(
@@ -981,5 +982,9 @@ class Manager(Generic[SceneT]):
             self.scene.file_writer_settings.assets_dir,
             gain,
             gain_to_background,
+            pan=resolved_pan,
+            pitch=pitch,
+            fade_in=fade_in,
+            fade_out=fade_out,
         )
         self._marker(sound)

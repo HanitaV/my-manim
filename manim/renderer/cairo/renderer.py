@@ -393,7 +393,11 @@ class CairoRenderer(_RendererExecutionView):
         self._final_scene = scene
 
         if output.is_still or (not self.num_plays and output.fallback_to_still):
-            self.file_writer.save_image(self.get_frame())
+            pixels = self.get_frame()
+            post_fx = getattr(scene, "post_fx", None)
+            if post_fx is not None:
+                pixels = post_fx.apply(pixels, frame_index=0)
+            self.file_writer.save_image(pixels)
 
     def __enter__(self) -> Self:
         return self

@@ -181,7 +181,11 @@ class _TargetDrawer(_Drawer):
         renderer.render(scene, frame.offset, scene.moving_mobjects)
 
     def pixels(self, frame: _Frame) -> RGBAPixelArray:
-        return self._manager.renderer.get_frame()
+        pixels = self._manager.renderer.get_frame()
+        post_fx = getattr(self._manager.scene, "post_fx", None)
+        if post_fx is not None:
+            return post_fx.apply(pixels, frame_index=frame.index)
+        return pixels
 
     def end_play(self, play: _Play) -> None:
         if self._prepared and not play.frozen:
@@ -204,7 +208,20 @@ class _SceneImageDrawer(_Drawer):
 
     def pixels(self, frame: _Frame) -> RGBAPixelArray:
         manager = self._manager
-        return np.asarray(manager.renderer._get_scene_image(manager.scene))
+        pixels = np.asarray(manager.renderer._get_scene_image(manager.scene))
+        post_fx = getattr(manager.scene, "post_fx", None)
+        if post_fx is not None:
+            return post_fx.apply(pixels, frame_index=frame.index)
+        return pixels
+
+
+def _has_sound_cues(animation: Animation) -> bool:
+    if getattr(animation, "_sound_cues", None):
+        return True
+    children = getattr(animation, "animations", None)
+    if children:
+        return any(_has_sound_cues(child) for child in children)
+    return False
 
 
 class _RunLoop:
@@ -346,6 +363,8 @@ class _RunLoop:
         if scene.updaters or scene.always_update_mobjects or scene.meshes:
             return False
         assert scene.animations is not None
+        if any(_has_sound_cues(animation) for animation in scene.animations):
+            return False
         roots: list[Mobject | OpenGLMobject] = [*scene.mobjects]
         roots += [a.mobject for a in scene.animations if a.mobject is not None]
         return not any(

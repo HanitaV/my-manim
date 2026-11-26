@@ -40,6 +40,11 @@ class VideoSegmentEncoder:
             stream.pix_fmt = self.spec.pixel_format
             stream.width = self.spec.width
             stream.height = self.spec.height
+            if self.spec.pixel_format.startswith("yuv"):
+                with suppress(Exception):
+                    stream.codec_context.color_primaries = 1
+                    stream.codec_context.color_trc = 1
+                    stream.codec_context.colorspace = 1
         except BaseException as error:
             if container is not None:
                 with suppress(BaseException):
