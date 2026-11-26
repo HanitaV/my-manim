@@ -17,6 +17,7 @@ from .cuda import (
     nvenc_available,
 )
 from .postfx import CinemaPostFX
+from .skill import install_cinema_skill
 from .synth import (
     SFX_GLASS_CHIME,
     SFX_GLASS_TAP,
@@ -38,6 +39,7 @@ __all__ = [
     "cuda_available",
     "cuda_device_name",
     "nvenc_available",
+    "install_cinema_skill",
     "make_ambient_background",
     "make_ambient_background_image",
     "attach_frame_trigger",

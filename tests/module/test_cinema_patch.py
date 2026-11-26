@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import av
 import numpy as np
 import pytest
+from click.testing import CliRunner
 
 from manim import (
     BLACK,
@@ -52,6 +55,7 @@ from manim import (
     cuda_available,
     cuda_device_name,
     harmonize_color,
+    install_cinema_skill,
     make_ambient_background_image,
     nvenc_available,
     render_contact_sheet,
@@ -668,4 +672,55 @@ def test_postfx_defocus_aspect_narration_and_qa_contact_sheet(tmp_path):
     )
     assert sheet.exists()
     assert sheet.stat().st_size > 1000
+
+
+def test_cinema_skill_bundle_and_cli_installer(tmp_path):
+    from manim.__main__ import main
+
+    repo_root = Path(__file__).resolve().parents[2]
+    repo_skill = repo_root / ".agents" / "skills" / "cinema-director" / "SKILL.md"
+    bundled_skill = (
+        repo_root / "manim" / "cinema" / "_skill_assets" / "SKILL.md"
+    )
+    assert repo_skill.read_text(encoding="utf-8") == bundled_skill.read_text(
+        encoding="utf-8"
+    )
+
+    proj_dir = tmp_path / "video_proj"
+    proj_dir.mkdir()
+    agents_file = proj_dir / "AGENTS.md"
+    agents_file.write_text("# My Custom Project Notes\n\nKeep audio loud.\n", encoding="utf-8")
+
+    written = install_cinema_skill(proj_dir, claude=True)
+    assert (proj_dir / ".agents" / "skills" / "cinema-director" / "SKILL.md") in written
+    assert (
+        proj_dir
+        / ".agents"
+        / "skills"
+        / "cinema-director"
+        / "references"
+        / "api-cheatsheet.md"
+    ).exists()
+    assert (
+        proj_dir
+        / ".agents"
+        / "skills"
+        / "cinema-director"
+        / "examples"
+        / "kinematics_cinema_example.py"
+    ).exists()
+    assert (proj_dir / ".claude" / "skills" / "cinema-director" / "SKILL.md").exists()
+
+    # Re-running preserves user prose and does not duplicate the marker block
+    install_cinema_skill(proj_dir, claude=True)
+    agents_text = agents_file.read_text(encoding="utf-8")
+    assert "# My Custom Project Notes" in agents_text
+    assert agents_text.count("<!-- manim-cinema:start -->") == 1
+
+    cli_dir = tmp_path / "cli_proj"
+    cli_dir.mkdir()
+    result = CliRunner().invoke(main, ["cinema-skill", str(cli_dir)])
+    assert result.exit_code == 0, result.output
+    assert (cli_dir / ".agents" / "skills" / "cinema-director" / "SKILL.md").exists()
+    assert (cli_dir / "AGENTS.md").exists()
 

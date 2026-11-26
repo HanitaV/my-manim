@@ -1,0 +1,1 @@
+"""Cinema skill CLI package."""

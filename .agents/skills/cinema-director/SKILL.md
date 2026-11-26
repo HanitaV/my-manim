@@ -1,38 +1,33 @@
 ---
 name: cinema-director
-description: Storyboard-first production workflow for dark monochrome-luxury Cinema videos, product teardowns, glass UI, code walkthroughs, spatial audio, and contact-sheet QA in my-manim.
+description: >-
+  MANDATORY workflow and visual standard for ALL Manim videos, STEM/physics/math/code
+  explainers, product teardowns, glass UI scenes, and vertical Shorts built with my-manim.
+  Activate whenever creating, editing, refactoring, or rendering any Scene in this project.
 ---
 
-# Cinema Director Workflow (`my-manim`)
+# Cinema Director Standard (`manim.cinema`)
 
-Follow this end-to-end production pipeline whenever creating explainer, architecture, or teardown videos with `manim.cinema`.
+Every video scene in this repository or any project powered by `my-manim` **MUST** use the `manim.cinema` stack. Do not write plain vanilla Manim `Scene`s with flat colored backgrounds or rainbow shapes.
 
-## 1. Storyboard & One-Take Audio First
-1. Draft the narration as natural spoken prose (never choppy per-line snippets).
-2. If you have voiceover + word timestamps JSON (`{"beats": ..., "words": [...]}`), load it via `self.set_narration(json_path, audio_file="voice.mp3", bgm="bgm.mp3", bgm_gain=-14.0, bgm_duck=-8.0)`.
-3. Map every visual cut to `self.wait_until("word or beat")` so pacing follows the spoken clock rather than fragile hardcoded waits.
-4. Choose target aspect ratio on `CinemaScene`:
-   - `aspect = "16:9"` (landscape explainers, 1920x1080)
-   - `aspect = "9:16"` (Shorts / Reels, 1080x1920 — keep HUD inside `self.safe_rect()`)
-   - `aspect = "1:1"` (square social cards, 1080x1080)
+## Hard Enforcement Rules (Forbidden vs Mandatory)
 
-## 2. Visual Grammar: Monochrome Luxury + Restrained Accents
-- **85–90% Monochrome Base**: Deep obsidian backdrop (`CINEMA_OBSIDIAN`), shadow-free clean dark glass (`GlassPanel`, `GlassBadge`), white-to-charcoal rims, and black-to-white gradients (`apply_mono_gradient`). Never add liquid distortion (`refraction=0`) or drop shadows on glass.
-- **10–15% Semantic Mineral Accents**: Pair element roles cleanly via `harmonize_color()` or `apply_accent_gradient()`:
-  - Optical / system geometry: `CINEMA_ICE`
-  - Live telemetry / active pass: `CINEMA_EMERALD`
-  - Audio / warm emphasis: `CINEMA_CHAMPAGNE`
-  - Caution / error cue: `CINEMA_ROSE`
+| Area | Forbidden (Do NOT Do) | Mandatory (`manim.cinema`) |
+| :--- | :--- | :--- |
+| **Scene base** | `class Foo(Scene):` or `MovingCameraScene` | `class Foo(CinemaScene):` (enables ambient studio backdrop, `CinemaPostFX`, CUDA, NVENC). |
+| **Color hierarchy** | Multi-color rainbow fills (`RED`, `YELLOW`, `GREEN`, `BLUE` solid PowerPoint circles/boxes). | **85–90% Monochrome Black → White Gradient** (`CINEMA_OBSIDIAN`..`CINEMA_IVORY`, `apply_mono_gradient`) + **10–15% semantic mineral accents** (`CINEMA_ICE`, `CINEMA_EMERALD`, `CINEMA_CHAMPAGNE`, `CINEMA_ROSE`, `harmonize_color`, `apply_accent_gradient`). |
+| **UI containment** | Naked corner text, floating tags, bare mini-charts, or naked formulas on empty background. | Wrap HUD tags in `self.glass_badge()`, cards/charts/formulas in `self.glass_panel()` or `self.glass_stack()`, pointers in `self.callout()`, layered architectures in `self.explode_stack()`, and code in `self.glass_code()`. |
+| **Glass optics** | Liquid distortion (`refraction > 0`), drop shadows, or hard sheen cut bands. | Keep clean shadowless dark glass (`refraction=0.0`, subtle smooth tint & white-to-charcoal rim). |
+| **Motion & state** | Manual `ValueTracker` + `.become()` boilerplate; stiff `linear` timing; leftover mobjects after transitions. | Use `self.signal()`, `ReactiveText`, `bind_progress_bar`, spring presets (`cinema_spring_smooth`, `cinema_spring_snappy`, `cinema_spring_plop`), `camera_focus`, and `blur_transition`. On swaps, remove `*old.get_family()` so zero ghost mobjects remain. |
+| **Audio & pacing** | Silent UI animations or fragile hardcoded waits when voiceover exists. | Attach spatial SFX (`SFX_GLASS_CHIME`, `SFX_GLASS_TAP`, `SFX_WHOOSH`, `SFX_SOFT_TICK`, `SFX_SUB_IMPACT`) via `.with_sound()`, `bind_value_tick`, `on_proximity_sound`, and sync narration via `self.set_narration(...)` + `self.wait_until(...)`. |
+| **Resolution & QA** | Delivering `-ql` (`854x480`) previews without visual QA. | Set `aspect = "16:9" | "9:16" | "1:1"`, stay inside `self.safe_rect()`, assert `not self.check_layout()`, render `1920x1080` (or `1080x1920`), and inspect `render_contact_sheet(mp4_path)`. |
 
-## 3. Motion, Teardown & Code Primitives
-- **Physics Springs**: Prefer `cinema_spring_smooth`, `cinema_spring_snappy`, `cinema_spring_plop`, or `spring_rate(SpringSpec(...))` over mechanical linear fades. Use `attach_spring_follower()` for tracking HUD pointers.
-- **Reactive State**: Drive counters and meters with `sig = self.signal(0.0)`, `ReactiveText`, and `bind_progress_bar` instead of manual per-frame `add_updater` boilerplate.
-- **Product Teardowns**: Stack subsystems in `ExplodeStack` (`explode`, `focus_layer`, `restore_layers`, `collapse`) and attach live leader-line labels with `GlassCallout`.
-- **Flex Cards**: Group growing/shrinking UI lists in `GlassStack` (`animate_push`).
-- **Code Walkthroughs**: Use `GlassCode` (`focus_lines`, `focus_token`, `animate_diff`) for live diffing and spotlighting.
-- **Camera & Transitions**: Use `camera_focus`, `camera_reset`, `camera_impulse`, `blur_transition` (GPU optical defocus), and `slide_transition`. Pair motion cues with spatial SFX (`SFX_GLASS_CHIME`, `SFX_GLASS_TAP`, `SFX_WHOOSH`, `SFX_SOFT_TICK`, `SFX_SUB_IMPACT`).
+## Production Workflow
 
-## 4. CUDA Render & QA Gate (Mandatory Before Shipping)
-1. Validate layout bounds & overlaps: assert `not self.check_layout()` before finishing animated sections.
-2. Render with `.venv\Scripts\python.exe -m manim render -r 1920,1080 --fps 24 --format mp4 <scene_file.py> <SceneClass>` (CUDA post-FX and `h264_nvenc` activate automatically).
-3. Generate a contact sheet via `render_contact_sheet(mp4_path, cols=4, rows=3)` and visually inspect it for text clipping, overlaps, dark banding, or stale labels before finalizing.
+1. **Plan Beats & Narration**: Draft continuous spoken narration (or beat timestamps) and load with `self.set_narration(...)` / `self.load_beats(...)` so visual cuts stay locked to `self.wait_until(...)`.
+2. **Compose Inside Glass Containers**: Group formulas, plots, and callouts cleanly inside `GlassPanel`, `GlassStack`, `GlassCallout`, `ExplodeStack`, or `GlassCode`. Look up exact signatures in [api-cheatsheet.md](./references/api-cheatsheet.md) and a complete STEM physics pattern in [kinematics_cinema_example.py](./examples/kinematics_cinema_example.py).
+3. **Animate With Springs & Camera**: Use `cinema_spring_smooth` for cards/camera glides, `cinema_spring_plop` sparingly for badge pops, `camera_focus` to spotlight details, and `blur_transition` between chapters (`self.remove(old, *old.get_family())`).
+4. **Render & Inspect QA Contact Sheet**:
+   - Fast layout check (`-ql`): verify timing and `assert not self.check_layout()`.
+   - Final CUDA + NVENC render: `manim render -r 1920,1080 --fps 24 --format mp4 <file.py> <Scene>` (or `1080,1920` for `"9:16"`).
+   - Export and inspect `render_contact_sheet(mp4_path, cols=4, rows=3)` for overlap, clipping, banding, or orphan glyphs before shipping.
